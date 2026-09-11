@@ -1,0 +1,18 @@
+Copyright 2026 Martin Jochum
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Portions of this software are derived from openai/codex-plugin-cc,
+Copyright 2026 OpenAI, licensed under the Apache License, Version 2.0.
+Affected files carry their original copyright header:
+  plugins/localreview/scripts/lib/args.mjs
+  plugins/localreview/scripts/lib/fs.mjs
+  plugins/localreview/scripts/lib/process.mjs
+  plugins/localreview/scripts/lib/workspace.mjs
+  plugins/localreview/scripts/lib/git.mjs
+  plugins/localreview/scripts/lib/state.mjs
+  plugins/localreview/scripts/lib/tracked-jobs.mjs
