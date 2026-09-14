@@ -1,3 +1,6 @@
+import http from "node:http";
+import https from "node:https";
+
 import { REVIEW_SCHEMA_NAME } from "./prompts.mjs";
 
 const JSON_HEADERS = { "content-type": "application/json" };
@@ -217,6 +220,82 @@ function parseSseLine(line, state, onProgress) {
   }
 }
 
+function abortError() {
+  const error = new Error("This operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+// Die ersten 500 Byte des Fehler-Bodys, gelesen vom rohen Stream statt ueber
+// Response.text() -- denselben Zweck wie readErrorDetail, nur fuer den
+// node:http-Pfad unten.
+async function readStreamErrorDetail(response) {
+  try {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response) {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size >= 500) {
+        break;
+      }
+    }
+    const body = Buffer.concat(chunks).toString("utf8").trim();
+    return body ? ` ${body.slice(0, 500)}` : "";
+  } catch {
+    return "";
+  }
+}
+
+// Bewusst node:http statt fetch: undici, der Unterbau von fetch, bricht jeden
+// Response-Body ab, der 300 Sekunden lang kein Byte liefert
+// (UND_ERR_BODY_TIMEOUT, nach aussen nur "terminated"). Waehrend der Server
+// einen grossen Prompt prefillt, fliesst genau nichts -- gemessen 34816 von
+// 198267 Token nach fuenf Minuten. Der Review starb dadurch zuverlaessig, bevor
+// das Modell sein erstes Token schrieb, und config.deadlineMs kam nie zum Zug.
+// node:http kennt dieses Vorgabe-Timeout nicht; die einzige Grenze ist wieder
+// das signal des Aufrufers. Weiterleitungen werden nicht verfolgt (node:http
+// tut das von sich aus nicht) und schlagen als HTTP-Fehler auf -- dieselbe
+// Absicht wie das fruehere redirect: "error".
+function postEventStream(config, suffix, payload, signal) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL(endpoint(config, suffix));
+    } catch (error) {
+      reject(new ReviewTransportError(`Ungueltige Server-Adresse: ${error.message}`, {
+        kind: "unreachable",
+        cause: error
+      }));
+      return;
+    }
+
+    const body = Buffer.from(JSON.stringify(payload), "utf8");
+    const request = (url.protocol === "https:" ? https : http).request(
+      url,
+      {
+        method: "POST",
+        signal,
+        headers: { ...JSON_HEADERS, "content-length": String(body.byteLength) }
+      },
+      resolve
+    );
+
+    request.on("error", (error) => {
+      if (error?.name === "AbortError") {
+        reject(error);
+        return;
+      }
+      reject(new ReviewTransportError(`Server nicht erreichbar: ${error.message}`, {
+        kind: "unreachable",
+        cause: error
+      }));
+    });
+
+    request.end(body);
+  });
+}
+
 export async function requestReview(config, options = {}) {
   const { model, instructions, payload, schema, maxOutputTokens = 32_768, signal, onProgress } = options;
 
@@ -231,28 +310,11 @@ export async function requestReview(config, options = {}) {
 
   const state = { event: null, text: "", tokensSeen: 0, incomplete: false, incompleteReason: null };
 
-  let response;
-  try {
-    response = await fetch(endpoint(config, "/responses"), {
-      method: "POST",
-      signal,
-      redirect: "error",
-      headers: JSON_HEADERS,
-      body: JSON.stringify(body)
-    });
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw error;
-    }
-    throw new ReviewTransportError(`Server nicht erreichbar: ${error.message}`, {
-      kind: "unreachable",
-      cause: error
-    });
-  }
+  const response = await postEventStream(config, "/responses", body, signal);
 
-  if (!response.ok) {
+  if (response.statusCode < 200 || response.statusCode >= 300) {
     throw new ReviewTransportError(
-      `Review-Call scheiterte mit HTTP ${response.status}.${await readErrorDetail(response)}`,
+      `Review-Call scheiterte mit HTTP ${response.statusCode}.${await readStreamErrorDetail(response)}`,
       { kind: "http" }
     );
   }
@@ -260,7 +322,7 @@ export async function requestReview(config, options = {}) {
   const decoder = new TextDecoder();
   let buffer = "";
   try {
-    for await (const chunk of response.body) {
+    for await (const chunk of response) {
       buffer += decoder.decode(chunk, { stream: true });
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
@@ -272,6 +334,13 @@ export async function requestReview(config, options = {}) {
   } catch (error) {
     if (error?.name === "AbortError") {
       throw error;
+    }
+    // Wird der Socket durch das Signal zerrissen, meldet der Response-Stream je
+    // nach Zeitpunkt einen ECONNRESET statt eines AbortError. Der Aufrufer
+    // unterscheidet Deadline und Nutzerabbruch aber am Namen -- ohne diese
+    // Umdeutung wuerde ein Abbruch als Serverfehler gemeldet.
+    if (signal?.aborted) {
+      throw abortError();
     }
     throw new ReviewTransportError(`Verbindung waehrend des Reviews abgebrochen: ${error.message}`, {
       kind: "stream",
