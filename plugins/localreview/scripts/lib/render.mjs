@@ -21,6 +21,9 @@ function renderOmissions(meta) {
   if (meta.secretFiles?.length) {
     lines.push(`Aus Sicherheitsgruenden ausgelassen: ${meta.secretFiles.join(", ")}`);
   }
+  if (meta.generatedFiles?.length) {
+    lines.push(`Als maschinell erzeugt ausgelassen: ${meta.generatedFiles.join(", ")}`);
+  }
   return lines;
 }
 

@@ -78,8 +78,12 @@ function makeOverBudgetRepo() {
   fs.writeFileSync(path.join(cwd, "seed.js"), "const seed = 1;\n", "utf8");
   run("git", ["add", "."], { cwd });
   run("git", ["commit", "-m", "init"], { cwd });
-  fs.writeFileSync(path.join(cwd, "bigfile1.txt"), "a".repeat(90_000), "utf8");
-  fs.writeFileSync(path.join(cwd, "bigfile2.txt"), "b".repeat(90_000), "utf8");
+  // Gross, aber normal umbrochen: gemeint ist "sprengt das Token-Budget", nicht
+  // "ist maschinell erzeugt". Als ein einziger 90.000-Zeichen-Zeile schriebe das
+  // Fixture ungewollt den zweiten Fall hin, und isGeneratedContent wuerde beide
+  // Dateien aus dem Fan-out nehmen -- der Map-Reduce-Pfad bliebe ungeprueft.
+  fs.writeFileSync(path.join(cwd, "bigfile1.txt"), `${"a".repeat(89)}\n`.repeat(1_000), "utf8");
+  fs.writeFileSync(path.join(cwd, "bigfile2.txt"), `${"b".repeat(89)}\n`.repeat(1_000), "utf8");
   run("git", ["add", "bigfile1.txt", "bigfile2.txt"], { cwd });
   return cwd;
 }

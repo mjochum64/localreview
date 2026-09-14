@@ -240,3 +240,81 @@ test("aborts on signal", { timeout: 5000 }, async () => {
     await server.close();
   }
 });
+
+// Der Fehler, der diese Umstellung ausgeloest hat: fetch laeuft ueber undici,
+// und undici bricht jeden Response-Body ab, der 300 Sekunden lang kein Byte
+// liefert -- UND_ERR_BODY_TIMEOUT, nach aussen nur "terminated". Genau so
+// verhaelt sich ein Server, der einen grossen Prompt prefillt: Header sofort,
+// danach minutenlang Stille. Der Test kann keine 300 Sekunden warten; er haelt
+// fest, dass ein Body, der erst nach einer Pause einsetzt, ueberhaupt
+// durchlaeuft -- und schlaegt an, sobald jemand dem Transport wieder ein kurzes
+// Body-Timeout verpasst.
+test("survives a body that stays silent after the headers", async () => {
+  const server = await startFakeServer(({ res }) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    setTimeout(() => {
+      for (const event of textEvents(JSON.stringify(APPROVED))) {
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+      }
+      res.end();
+    }, 400);
+  });
+  try {
+    const result = await requestReview(
+      { baseUrl: server.baseUrl },
+      { model: "m1", instructions: "x", payload: "y", schema: SCHEMA }
+    );
+    assert.deepEqual(result.parsed, APPROVED);
+  } finally {
+    await server.close();
+  }
+});
+
+// Das Deadline-Signal ist nach der Umstellung die einzige verbliebene Grenze.
+// Reisst es den Socket auf, meldet der Response-Stream je nach Zeitpunkt einen
+// ECONNRESET -- der Aufrufer unterscheidet Zeitlimit und Nutzerabbruch aber am
+// Namen AbortError, und ein Serverfehler an dieser Stelle wuerde den Nutzer auf
+// die falsche Faehrte schicken.
+test("reports an aborted stream as AbortError, not as a server failure", async () => {
+  const controller = new AbortController();
+  let open = null;
+  const server = await startFakeServer(({ res }) => {
+    open = res;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("event: response.created\ndata: {}\n\n");
+    setTimeout(() => controller.abort(), 100);
+  });
+  try {
+    await assert.rejects(
+      requestReview(
+        { baseUrl: server.baseUrl },
+        { model: "m1", instructions: "x", payload: "y", schema: SCHEMA, signal: controller.signal }
+      ),
+      (error) => error.name === "AbortError"
+    );
+  } finally {
+    // Der Client ist weg, die Antwort des Fake-Servers bleibt sonst offen und
+    // server.close() wartet auf eine Verbindung, die niemand mehr beendet.
+    open?.destroy();
+    await server.close();
+  }
+});
+
+// Vor der Umstellung verhinderte redirect: "error", dass der Review-Payload
+// einem umgeleiteten Ziel hinterhergetragen wird. node:http folgt von sich aus
+// keiner Weiterleitung -- der Test haelt fest, dass sie als Fehler ankommt und
+// nicht stillschweigend verfolgt wird.
+test("does not follow a redirect away from the configured server", async () => {
+  const server = await startFakeServer(({ res }) => {
+    res.writeHead(302, { location: "http://example.invalid/v1/responses" });
+    res.end();
+  });
+  try {
+    await assert.rejects(
+      requestReview({ baseUrl: server.baseUrl }, { model: "m1", instructions: "x", payload: "y", schema: SCHEMA }),
+      (error) => error instanceof ReviewTransportError && error.kind === "http" && /HTTP 302/.test(error.message)
+    );
+  } finally {
+    await server.close();
+  }
+});

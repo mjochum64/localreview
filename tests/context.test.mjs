@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildPerFilePayloads,
   buildReviewPayload,
   estimateTokens,
   isSecretPath
@@ -97,4 +98,37 @@ test("reports over-budget when the diff alone does not fit", () => {
   const context = makeContext({ content: "x".repeat(4000) });
   const payload = buildReviewPayload(context, { budgetTokens: 100, readFile: () => null });
   assert.equal(payload.overBudget, true);
+});
+
+// Der Fall, der diesen Filter ausgeloest hat: ein generiertes 720-KB-Diagramm
+// im Working Tree erzeugte einen Prompt von 198267 Token, verdraengte jede echte
+// Code-Aenderung und lieferte nach 36 Minuten Prefill eine leere Antwort.
+test("keeps machine-generated content out of the payload and names it", () => {
+  const payload = buildReviewPayload(
+    makeContext({ changedFiles: ["a.js", "docs/diagram.html"] }),
+    {
+      budgetTokens: 8_000,
+      readFile: (file) => (file === "a.js" ? "const a = 1;\n" : `<svg>${"d".repeat(5_000)}</svg>\n`)
+    }
+  );
+  assert.deepEqual(payload.includedFiles, ["a.js"]);
+  assert.deepEqual(payload.generatedFiles, ["docs/diagram.html"]);
+  assert.deepEqual(payload.omittedFiles, []);
+  assert.match(payload.text, /Als maschinell erzeugt ausgelassen/);
+  assert.match(payload.text, /docs\/diagram\.html/);
+  assert.equal(payload.text.includes("ddddd"), false);
+});
+
+// Eine generierte Datei aus dem Sammel-Payload zu werfen, sie im Fan-out aber
+// mit einem eigenen Aufruf ueber das volle Budget zu belohnen, waere teurer als
+// gar nicht zu filtern.
+test("skips machine-generated files in the per-file fan-out too", () => {
+  const parts = buildPerFilePayloads(
+    makeContext({ changedFiles: ["a.js", "docs/diagram.html", ".env"] }),
+    {
+      budgetTokens: 8_000,
+      readFile: (file) => (file === "a.js" ? "const a = 1;\n" : `<svg>${"d".repeat(5_000)}</svg>\n`)
+    }
+  );
+  assert.deepEqual(parts.map((part) => part.file), ["a.js"]);
 });
