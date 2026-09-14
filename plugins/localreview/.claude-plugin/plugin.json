@@ -1,6 +1,6 @@
 {
   "name": "localreview",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Code-Reviews gegen ein lokal laufendes Modell.",
   "author": {
     "name": "saaro.net"
