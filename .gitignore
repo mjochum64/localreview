@@ -4,4 +4,3 @@ node_modules/
 .worktrees/
 .superpowers/
 .serena/
-docs/diagrams/*.html

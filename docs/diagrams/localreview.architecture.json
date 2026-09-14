@@ -1,0 +1,354 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "localreview Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/mjochum64/localreview",
+      "revision": "244ac46b215e3f6a48ba7cf30191968aa30e4b0f"
+    }
+  },
+  "components": [
+    {
+      "id": "secrets",
+      "type": "security",
+      "label": "secrets.mjs",
+      "sublabel": ".env · *.pem · *.key",
+      "pos": [
+        60,
+        140
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/secrets.mjs",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "id": "git",
+      "type": "backend",
+      "label": "git.mjs",
+      "sublabel": "diff + file context",
+      "pos": [
+        330,
+        140
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/git.mjs",
+          "line": 337,
+          "label": "collectReviewContext"
+        }
+      ]
+    },
+    {
+      "id": "context",
+      "type": "backend",
+      "label": "context.mjs",
+      "sublabel": "payload · token budget",
+      "tag": "map/reduce",
+      "pos": [
+        600,
+        140
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/context.mjs",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude Code",
+      "sublabel": "5 slash commands",
+      "pos": [
+        60,
+        330
+      ],
+      "size": [
+        150,
+        68
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/commands/review.md"
+        }
+      ]
+    },
+    {
+      "id": "companion",
+      "type": "backend",
+      "label": "review-companion.mjs",
+      "sublabel": "CLI orchestrator",
+      "tag": "--json",
+      "pos": [
+        330,
+        330
+      ],
+      "size": [
+        160,
+        68
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/review-companion.mjs"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "backend",
+      "label": "client.mjs",
+      "sublabel": "OpenAI-compatible transport",
+      "pos": [
+        600,
+        330
+      ],
+      "size": [
+        150,
+        68
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/client.mjs",
+          "line": 220,
+          "label": "requestReview"
+        }
+      ]
+    },
+    {
+      "id": "server",
+      "type": "external",
+      "label": "Local model server",
+      "sublabel": "oMLX · 127.0.0.1:8000",
+      "pos": [
+        920,
+        330
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "render",
+      "type": "frontend",
+      "label": "render.mjs",
+      "sublabel": "German report",
+      "pos": [
+        60,
+        520
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/render.mjs",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "state.mjs",
+      "sublabel": "jobs · results · logs",
+      "pos": [
+        330,
+        520
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/state.mjs",
+          "line": 31
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "type": "backend",
+      "label": "config.mjs",
+      "sublabel": "flag › env › ~/.config",
+      "pos": [
+        600,
+        520
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "plugins/localreview/scripts/lib/config.mjs",
+          "line": 44
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Developer machine — loopback only",
+      "wraps": [
+        "secrets",
+        "git",
+        "context",
+        "claude",
+        "companion",
+        "client",
+        "server",
+        "render",
+        "state",
+        "config"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Secret files never enter the payload",
+      "wraps": [
+        "secrets",
+        "git"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "invoke",
+      "from": "claude",
+      "to": "companion",
+      "label": "slash command",
+      "variant": "emphasis"
+    },
+    {
+      "id": "collect",
+      "from": "companion",
+      "to": "git",
+      "label": "collect diff",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "exclude",
+      "from": "secrets",
+      "to": "git",
+      "label": "exclude pathspecs",
+      "variant": "security"
+    },
+    {
+      "id": "build-context",
+      "from": "git",
+      "to": "context",
+      "label": "review context"
+    },
+    {
+      "id": "payload",
+      "from": "context",
+      "to": "client",
+      "label": "payload · budget",
+      "labelAt": [
+        675,
+        268
+      ]
+    },
+    {
+      "id": "review-call",
+      "from": "client",
+      "to": "server",
+      "label": "POST /responses · SSE",
+      "variant": "emphasis",
+      "labelAt": [
+        835,
+        406
+      ]
+    },
+    {
+      "id": "warm-up",
+      "from": "client",
+      "to": "server",
+      "label": "/models · warm-up",
+      "variant": "dashed",
+      "labelAt": [
+        835,
+        338
+      ]
+    },
+    {
+      "id": "resolve",
+      "from": "config",
+      "to": "client",
+      "label": "baseUrl · model"
+    },
+    {
+      "id": "persist",
+      "from": "companion",
+      "to": "state",
+      "label": "job record · log",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "read-result",
+      "from": "state",
+      "to": "render",
+      "label": "stored result"
+    },
+    {
+      "id": "report",
+      "from": "render",
+      "to": "claude",
+      "label": "German report"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Local only",
+      "items": [
+        "Diff and files never leave 127.0.0.1",
+        "Base URL checked for loopback before every call",
+        "Default server http://127.0.0.1:8000/v1"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Review path",
+      "items": [
+        "git.mjs collects working-tree or branch diff",
+        "context.mjs fits it into the model's token budget",
+        "Over budget: one call per file, then a reduce call"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Read-only and secrets",
+      "items": [
+        "No patches written, no suggestions applied",
+        ".env, *.pem, *.key, id_rsa excluded from the diff",
+        "Every omission is named in the report"
+      ]
+    }
+  ]
+}
