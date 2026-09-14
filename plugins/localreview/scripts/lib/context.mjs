@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { isGeneratedContent } from "./generated.mjs";
 import { isSecretPath } from "./secrets.mjs";
 
+export { GENERATED_LINE_LENGTH, isGeneratedContent } from "./generated.mjs";
 export { SECRET_FILE_PATTERNS, isSecretPath } from "./secrets.mjs";
 
 export function estimateTokens(text) {
@@ -37,6 +39,7 @@ export function buildReviewPayload(reviewContext, options = {}) {
   const includedFiles = [];
   const omittedFiles = [];
   const secretFiles = [];
+  const generatedFiles = [];
   const bodies = [];
 
   for (const file of reviewContext.changedFiles) {
@@ -51,6 +54,14 @@ export function buildReviewPayload(reviewContext, options = {}) {
     const content = readFile(file);
     if (content === null) {
       omittedFiles.push(file);
+      continue;
+    }
+    // Vor der Budget-Rechnung, nicht danach: eine generierte Datei ist nicht
+    // knapp am Platz gescheitert, sie gehoert gar nicht erst in den Payload --
+    // und wuerde als erste den ganzen Platz fuer die handgeschriebenen Dateien
+    // auffressen.
+    if (isGeneratedContent(content)) {
+      generatedFiles.push(file);
       continue;
     }
     const block = `\n## Datei: ${file}\n\n\`\`\`\n${content}\n\`\`\`\n`;
@@ -73,12 +84,18 @@ export function buildReviewPayload(reviewContext, options = {}) {
       `\n## Aus Sicherheitsgruenden ausgelassen (moegliche Zugangsdaten)\n\n${secretFiles.join("\n")}\n`
     );
   }
+  if (generatedFiles.length > 0) {
+    notes.push(
+      `\n## Als maschinell erzeugt ausgelassen\n\n${generatedFiles.join("\n")}\n`
+    );
+  }
 
   return {
     text: [core, ...bodies, ...notes].join(""),
     includedFiles,
     omittedFiles,
     secretFiles,
+    generatedFiles,
     overBudget
   };
 }
@@ -91,6 +108,12 @@ export function buildPerFilePayloads(reviewContext, options = {}) {
     .filter((file) => !isSecretPath(file))
     .map((file) => {
       const content = readFile(file) ?? "(Datei nicht lesbar)";
+      // Im Fan-out waere eine generierte Datei noch teurer als im Sammel-Payload:
+      // sie bekaeme einen eigenen Aufruf ueber das volle Budget, statt nur einen
+      // Anteil daran.
+      if (isGeneratedContent(content)) {
+        return null;
+      }
       const head = [
         `Branch: ${reviewContext.branch}`,
         `Review-Ziel: ${reviewContext.target.label}`,
@@ -103,7 +126,8 @@ export function buildPerFilePayloads(reviewContext, options = {}) {
         file,
         text: estimateTokens(text) > budgetTokens ? `${head}${block.slice(0, budgetTokens * 4)}\n(gekuerzt)\n` : text
       };
-    });
+    })
+    .filter(Boolean);
 }
 
 export function mergeFindings(results) {

@@ -402,7 +402,8 @@ function runReview(argv) {
         durationMs: Date.now() - startedAt,
         includedFiles: coverage.includedFiles,
         omittedFiles: coverage.omittedFiles,
-        secretFiles: payload.secretFiles
+        secretFiles: payload.secretFiles,
+        generatedFiles: payload.generatedFiles
       };
       const rendered = renderReviewResult(result, meta);
       const resultFile = writeJobFile(repoRoot, jobId, { result, meta, rendered });
